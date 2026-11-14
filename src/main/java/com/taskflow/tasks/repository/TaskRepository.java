@@ -8,4 +8,6 @@ import com.taskflow.tasks.entity.Tasks;
 @Repository 
 public interface TaskRepository extends JpaRepository<Tasks,Long> {
 
+    Object findByIdAndUserId(Long taskId, Long userId);
+
 }

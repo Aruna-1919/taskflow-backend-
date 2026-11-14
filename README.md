@@ -378,3 +378,202 @@ The shared Postman screenshot demonstrates:
 **Day 2 Status: Core Backend APIs Implemented and Tested Successfully**
 
 The initial backend foundation of TaskFlow is complete, with working Task and Category APIs, PostgreSQL integration, and verified data persistence.
+
+
+
+## 📅 Day 3 – Spring Security & JWT Authentication
+
+**Objective:** Secure the TaskFlow backend by implementing user registration and login with BCrypt password hashing and stateless JWT authentication using Spring Security. Build a custom JWT filter to validate tokens on every request, restrict task APIs to authenticated users, and verify the complete authentication flow through Postman testing.
+
+## Progress
+
+| Day | Work done |
+|-----|-----------|
+| 1 | Project setup, PostgreSQL connection, `/actuator/health` |
+| 2 | Task and Category REST APIs, Flyway migrations, tested in Postman |
+| 3 | User registration and login, JWT authentication, per-user task access |
+
+**Status of Day 3:** register, login, `GET /api/tasks` and `POST /api/tasks` work. `PUT /api/tasks/{id}` and `GET /api/tasks/{id}` still have issues and will be fixed next.
+
+## Project Structure
+
+```
+src/main/java/com/taskflow/tasks/
+├── config/        SecurityConfig (rules, CORS, BCrypt, filter order)
+├── security/      JwtService, JwtAuthFilter, CustomUserDetailsService
+├── controller/    AuthController, TaskController, CategoryController
+├── service/       AuthService, TaskService
+├── repository/    UserRepository, TaskRepository, CategoryRepository
+├── entity/        User, Tasks, Category
+└── dto/           RegisterRequest, LoginRequest, AuthResponse, UserResponse, TaskRequest, TaskResponse
+
+src/main/resources/
+├── application.properties
+└── db/migration/  Flyway SQL files
+```
+
+## API Endpoints
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/api/auth/register` | Public | Create an account |
+| POST | `/api/auth/login` | Public | Log in and receive a JWT |
+| GET | `/actuator/health` | Public | Health check |
+| GET | `/api/tasks` | Bearer token | List the logged-in user's tasks |
+| POST | `/api/tasks` | Bearer token | Create a task |
+| GET | `/api/tasks/{id}` | Bearer token | Get one task (in progress) |
+| PUT | `/api/tasks/{id}` | Bearer token | Update a task (in progress) |
+| DELETE | `/api/tasks/{id}` | Bearer token | Delete a task (planned) |
+
+## Understanding the Request Flow (Security)
+
+### Login and register
+
+Every request in the application first passes through the Spring Security filter chain, including login and register. For these two APIs, `JwtAuthFilter` runs but finds no `Authorization` header, so it does nothing and passes the request along. `AuthorizationFilter` then sees that `/api/auth/**` is configured as `permitAll`, so the request is allowed through to `AuthController`.
+
+- **Register:** `AuthController` calls `AuthService.register()`, which checks that the email isn't already used, hashes the password with BCrypt, and saves the user in PostgreSQL. No token is created at registration.
+- **Login:** `AuthController` calls `AuthService.login()`, which uses `AuthenticationManager` to authenticate the user. `AuthenticationManager` loads the user from the database through `CustomUserDetailsService` and compares the typed password with the stored BCrypt hash. If the credentials are correct, `AuthService` calls `JwtService.generateToken()` to create and sign the JWT with the secret key. The token is returned to the client in the response body. The server does not store the token anywhere. Angular saves it in the browser's `localStorage`.
+
+### All other APIs (like tasks)
+
+`SecurityConfig` runs only once at application startup. It defines the rules and arranges the filters in the chain, and it does not run on every request.
+
+For each protected request, the Angular HTTP interceptor reads the token from `localStorage` and adds it to the request header as `Authorization: Bearer <token>`. The request reaches Tomcat and passes through the filters in this order: `CorsFilter`, then `JwtAuthFilter`, then `AuthorizationFilter`.
+
+1. Inside `JwtAuthFilter.doFilterInternal()`, the token is read from the header and validated (signature and expiry) using `JwtService`.
+2. The filter doesn't use the password. It extracts the email from the token, loads the user through `CustomUserDetailsService` to confirm the user still exists, and stores the authenticated user in the `SecurityContext`.
+3. `AuthorizationFilter` checks whether the request is authenticated (the rule `anyRequest().authenticated()`).
+4. If it is, the request continues to the `DispatcherServlet`, which sends it to the right controller such as `TaskController`, then `TaskService`, then the repository and the database.
+5. The service checks ownership using the user's ID, so users only see and change their own tasks.
+
+If the token is missing, invalid, or expired, the `SecurityContext` stays empty, `AuthorizationFilter` blocks the request, and the client receives a **401**. The Angular interceptor then clears the token and redirects to the login page.
+
+### Token summary
+
+The token is created by `JwtService`, triggered by `AuthService` at login. It is sent to the client in the response body and stored in the browser's `localStorage`. It is attached to every request in the `Authorization` header by the Angular interceptor and validated by `JwtAuthFilter` on the backend. The server keeps no copy. The token is removed from `localStorage` on logout.
+
+## Configuration: JWT Secret Key
+
+The JWT secret is **never committed to Git**. It is read from an environment variable named `JWT_SECRET`.
+
+`application.properties`:
+
+```properties
+app.jwt.secret=${JWT_SECRET}
+app.jwt.expiration-ms=86400000
+```
+
+### 1. Generate a secret (PowerShell)
+
+```powershell
+[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+```
+
+The result must be a valid Base64 string of at least 32 bytes (about 44 characters).
+
+### 2. Set it: pick one option
+
+**Option 1: permanent (stored for your Windows user)**
+
+```powershell
+setx JWT_SECRET "paste-your-generated-secret-here"
+```
+
+Close the window and open a **new** PowerShell, then check:
+
+```powershell
+echo $env:JWT_SECRET
+```
+
+If you run the app from VS Code, restart VS Code too so it picks up the new variable.
+
+**Option 2: temporary (only for the current PowerShell window)**
+
+Open PowerShell in the project folder and run:
+
+```powershell
+$env:JWT_SECRET="paste-your-generated-secret-here"
+echo $env:JWT_SECRET
+mvn spring-boot:run
+```
+
+The variable is gone when the window is closed, so set it again each time.
+
+### Notes
+
+- Use a different secret for local development and for production.
+- On a hosting platform (Render, Railway, etc.), set `JWT_SECRET` in the platform's environment variable settings.
+- If a secret is ever pushed to GitHub, generate a new one. Existing tokens then become invalid.
+
+## Testing in Postman
+
+1. **Register:** `POST http://localhost:8080/api/auth/register`
+
+   ```json
+   {
+     "name": "Aruna",
+     "email": "aruna@test.com",
+     "password": "Test@12345"
+   }
+   ```
+
+   Expect `201`. In the database, `password_hash` should start with `$2a$`.
+
+2. **Login:** `POST http://localhost:8080/api/auth/login`
+
+   ```json
+   {
+     "email": "aruna@test.com",
+     "password": "Test@12345"
+   }
+   ```
+
+   Expect `200` with a `token`. Copy the token.
+
+3. **Call protected APIs:** in the request's **Authorization** tab choose **Bearer Token** and paste the token (don't type the word `Bearer`, Postman adds it).
+
+4. **Create a task:** `POST http://localhost:8080/api/tasks`
+
+   ```json
+   {
+     "title": "Finish JWT integration",
+     "description": "Complete login and token flow",
+     "status": "TODO",
+     "priority": "HIGH",
+     "dueDate": "2026-11-20",
+     "categoryId": 1
+   }
+   ```
+
+### Expected results
+
+| Test | Expected |
+|------|----------|
+| Register a new user | 201 |
+| Register the same email again | Error (duplicate email) |
+| Login with correct credentials | 200 + token |
+| Login with wrong password | 401 |
+| `GET /api/tasks` without a token | 401 |
+| `GET /api/tasks` with a valid token | 200 |
+| `POST /api/tasks` with a valid token | 201 |
+| Another user requests the first user's task | Should not be visible |
+
+## Running Locally
+
+1. Create a PostgreSQL database and set the connection in `application.properties`.
+2. Set the `JWT_SECRET` environment variable (see above).
+3. Run:
+
+   ```powershell
+   mvn spring-boot:run
+   ```
+
+4. The API is available at `http://localhost:8080`.
+
+## Next Steps
+
+- Fix `PUT /api/tasks/{id}` and `GET /api/tasks/{id}`
+- Add `DELETE /api/tasks/{id}`
+- Add a global exception handler for consistent error responses
+- Connect the Angular login and register screens to these APIs
+- Deployment

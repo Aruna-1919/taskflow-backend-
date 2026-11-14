@@ -1,77 +1,108 @@
 package com.taskflow.tasks.service;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.taskflow.tasks.dto.TaskRequest;
 import com.taskflow.tasks.dto.TaskResponse;
 import com.taskflow.tasks.entity.Tasks;
+import com.taskflow.tasks.entity.User;
+
 import com.taskflow.tasks.repository.CategoryRepository;
 import com.taskflow.tasks.repository.TaskRepository;
-import org.springframework.transaction.annotation.Transactional;
+import com.taskflow.tasks.repository.UserRepository;
 
-@Service 
+@Service
 public class TaskService {
 
-    @Autowired 
+    @Autowired
     private TaskRepository taskRepo;
-    @Autowired 
+    @Autowired
     private CategoryRepository catRepo;
+    @Autowired
+    private UserRepository userRepo;
 
-    //helper function which translating Tasks object to TaskResponse 
+    // helper: finds the logged-in user from the email stored in the token
+    private User currentUser(String email) {
+        return userRepo.findByEmail(email);
+    }
+
+    // helper: finds a task only if it belongs to this user, else 404
+    private Tasks findOwnedTask(Long taskId, Long userId) {
+        return (Tasks) taskRepo.findByIdAndUserId(taskId, userId);
+    }
+
+    // helper: Tasks entity -> TaskResponse DTO
     private TaskResponse toResponse(Tasks t) {
-    return new TaskResponse(
-            t.getId(),
-            t.getTitle(),
-            t.getDescription(),
-            t.getStatus(),
-            t.getPriority(),
-            t.getDueDate(),
-            t.getCreatedAt(),
-            t.getCategory() != null ? t.getCategory().getId() : null,
-            t.getCategory() != null ? t.getCategory().getName() : null
-    );
-}
-
-
-    //helper function which translating TaskResponse object to Tasks object
-    private Tasks apply(TaskRequest taskreRequest){
-        Tasks t=new Tasks();
-        t.setTitle(taskreRequest.title());
-        t.setDescription(taskreRequest.description());
-        t.setCategory(
-            catRepo.getReferenceById(taskreRequest.categoryId())
+        return new TaskResponse(
+                t.getId(),
+                t.getTitle(),
+                t.getDescription(),
+                t.getStatus(),
+                t.getPriority(),
+                t.getDueDate(),
+                t.getCreatedAt(),
+                t.getCategory() != null ? t.getCategory().getId() : null,
+                t.getCategory() != null ? t.getCategory().getName() : null
         );
-        t.setDueDate(taskreRequest.dueDate());
-        t.setPriority(taskreRequest.priority());
-        t.setStatus(taskreRequest.status());
-        return t;
     }
 
+    // helper: copies values from TaskRequest into a Tasks entity
+    // (used for both create and update)
+    private void applyRequest(Tasks t, TaskRequest req) {
+        t.setTitle(req.title());
+        t.setDescription(req.description());
+        t.setDueDate(req.dueDate());
+        t.setPriority(req.priority());
+        t.setStatus(req.status());
+        t.setCategory(req.categoryId() != null
+                ? catRepo.getReferenceById(req.categoryId())
+                : null);
+    }
 
-    // getting all records
-    public List<TaskResponse> getAllTasks() {
-        return taskRepo.findAll().stream()
-                .map(task -> this.toResponse(task))
+    // GET all tasks of the logged-in user
+    @Transactional(readOnly = true)
+    public List<TaskResponse> getAllTasks(String email) {
+        Long userId = currentUser(email).getId();
+        return taskRepo.findById(userId).stream()
+                .map(this::toResponse)
                 .toList();
-        
     }
 
-
-    // creating a task record 
-    public TaskResponse create(TaskRequest taskrequest) {
-        Tasks task=this.apply(taskrequest);
-        taskRepo.save(task);
-        return toResponse(task);
+    // CREATE a task for the logged-in user
+    @Transactional
+    public TaskResponse create(String email, TaskRequest req) {
+        Tasks task = new Tasks();
+        applyRequest(task, req);
+        task.setUser(currentUser(email));
+        return toResponse(taskRepo.save(task));
     }
 
-
-    // getting a single task record 
-    public TaskResponse getTask(Long id) {
-        Tasks task=taskRepo.getReferenceById(id);
-        return toResponse(task);
+    // GET one task (only if owned by the user)
+    @Transactional(readOnly = true)
+    public TaskResponse getTask(String email, Long id) {
+        Long userId = currentUser(email).getId();
+        return toResponse(findOwnedTask(id, userId));
     }
 
+    // UPDATE a task (only if owned by the user)
+    @Transactional
+    public TaskResponse update(String email, Long id, TaskRequest req) {
+        Long userId = currentUser(email).getId();
+        Tasks task = findOwnedTask(id, userId);
+        applyRequest(task, req);
+        return toResponse(taskRepo.save(task));
+    }
+
+    // DELETE a task (only if owned by the user)
+    @Transactional
+    public void delete(String email, Long id) {
+        Long userId = currentUser(email).getId();
+        Tasks task = findOwnedTask(id, userId);
+        taskRepo.delete(task);
+    }
 }

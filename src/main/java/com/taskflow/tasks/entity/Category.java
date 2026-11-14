@@ -1,7 +1,7 @@
 package com.taskflow.tasks.entity;
 
 import jakarta.persistence.Column;
-import jakarta.persistence.ColumnResult;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
