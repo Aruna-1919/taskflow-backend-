@@ -68,9 +68,9 @@ public class TaskService {
     @Transactional(readOnly = true)
     public List<TaskResponse> getAllTasks(String email) {
         Long userId = currentUser(email).getId();
-        return taskRepo.findById(userId).stream()
-                .map(this::toResponse)
-                .toList();
+        return taskRepo.findByUserId(userId).stream()
+            .map(this::toResponse)
+            .toList();
     }
 
     // CREATE a task for the logged-in user

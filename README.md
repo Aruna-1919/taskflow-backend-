@@ -577,3 +577,15 @@ The variable is gone when the window is closed, so set it again each time.
 - Add a global exception handler for consistent error responses
 - Connect the Angular login and register screens to these APIs
 - Deployment
+
+
+
+### 🐞 Bug Found While Testing Day 3 Frontend
+
+While testing the Angular frontend, I logged in as a second user and noticed that user 2's dashboard showed user 1's tasks.
+
+- **Cause:** `getAllTasks` looked up tasks with `findById(userId)`, which matches the **task id** instead of the **user id**. An earlier version also used `findAll()`, which returned every user's tasks.
+- **Fix:** Moved tasks to per-user access in the repository and service:
+  - `findByUserId(userId)` returns all tasks that belong to the logged-in user.
+  - `findByIdAndUserId(id, userId)` returns a single task only if it belongs to that user.
+- **Result:** Each user now sees only their own tasks. Verified by logging in as user 2, whose dashboard showed no tasks.
