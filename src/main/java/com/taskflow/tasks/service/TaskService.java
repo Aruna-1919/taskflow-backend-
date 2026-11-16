@@ -1,7 +1,6 @@
 package com.taskflow.tasks.service;
 
 import java.util.List;
-import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -11,7 +10,7 @@ import com.taskflow.tasks.dto.TaskRequest;
 import com.taskflow.tasks.dto.TaskResponse;
 import com.taskflow.tasks.entity.Tasks;
 import com.taskflow.tasks.entity.User;
-
+import com.taskflow.tasks.exceptions.TaskNotFoundException;
 import com.taskflow.tasks.repository.CategoryRepository;
 import com.taskflow.tasks.repository.TaskRepository;
 import com.taskflow.tasks.repository.UserRepository;
@@ -31,10 +30,10 @@ public class TaskService {
         return userRepo.findByEmail(email);
     }
 
-    // helper: finds a task only if it belongs to this user, else 404
-    private Tasks findOwnedTask(Long taskId, Long userId) {
-        return (Tasks) taskRepo.findByIdAndUserId(taskId, userId);
-    }
+   private Tasks findOwnedTask(Long taskId, Long userId) {
+    return taskRepo.findByIdAndUserId(taskId, userId)
+            .orElseThrow(() -> new TaskNotFoundException(taskId));
+}
 
     // helper: Tasks entity -> TaskResponse DTO
     private TaskResponse toResponse(Tasks t) {

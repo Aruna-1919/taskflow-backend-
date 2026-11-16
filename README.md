@@ -589,3 +589,62 @@ While testing the Angular frontend, I logged in as a second user and noticed tha
   - `findByUserId(userId)` returns all tasks that belong to the logged-in user.
   - `findByIdAndUserId(id, userId)` returns a single task only if it belongs to that user.
 - **Result:** Each user now sees only their own tasks. Verified by logging in as user 2, whose dashboard showed no tasks.
+
+
+# Day 4 – Backend: Bug Fixes and Error Handling
+
+**Date:** 16 Nov 2026 | **Focus:** make the task APIs correct and secure before building more features
+
+## Summary
+
+Fixed the broken `GET /tasks/{id}`, `PUT /tasks/{id}` and `DELETE /tasks/{id}` endpoints, and replaced fragile `Optional.get()` calls with proper exception handling so the API returns clean 404 responses instead of 500s.
+
+## The Bug
+
+All by-id endpoints go through one helper in `TaskController`. It was casting the repository result to `Tasks` and then calling `.get()`. `findByIdAndUserId` already returns an `Optional<Tasks>`, so the extra cast broke the call.
+
+A second, hidden problem: `.get()` on an empty `Optional` throws `NoSuchElementException`, which Spring turns into a **500**. A missing task (or another user's task) should be a **404**.
+
+## The Fix
+
+```java
+private Tasks findOwnedTask(Long taskId, Long userId) {
+    return taskRepo.findByIdAndUserId(taskId, userId)
+            .orElseThrow(() -> new TaskNotFoundException(taskId));
+}
+```
+
+## Changes Made
+
+- Fixed `findOwnedTask` (removed the cast, switched to `orElseThrow`)
+- Added `TaskNotFoundException`
+- Added `GlobalExceptionHandler` (`@RestControllerAdvice`) returning JSON errors:
+  ```json
+  { "error": "Task not found with id 99999" }
+  ```
+- Confirmed GET by id, PUT and DELETE all work end to end
+
+## Security Decision
+
+Another user's task returns **404, not 403**. The API never confirms that a task id exists for someone else.
+
+## Tested in Postman
+
+| Scenario | Expected | Result |
+|---|---|---|
+| GET own task by id | 200 | ✅ |
+| PUT own task | 200 | ✅ |
+| DELETE own task | 200/204 | ✅ |
+| GET/PUT/DELETE another user's task | 404 | ✅ |
+| Non-existent id | 404 | ✅ |
+| No token | 401 | ✅ |
+
+> Tick or edit these rows to match what you actually tested.
+
+## What I Learned
+
+- A small type-cast mistake can look like a big architectural problem. Read the stack trace first.
+- `Optional.get()` hides a 500. Use `orElseThrow`.
+- `@RestControllerAdvice` keeps error responses consistent across all controllers.
+- Return DTOs, not entities, from controllers.
+
