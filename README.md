@@ -648,3 +648,51 @@ Another user's task returns **404, not 403**. The API never confirms that a task
 - `@RestControllerAdvice` keeps error responses consistent across all controllers.
 - Return DTOs, not entities, from controllers.
 
+# TaskFlow Backend: Deployment
+
+Spring Boot API deployed with Docker on **Render**, connected to a **Neon** PostgreSQL database.
+
+- API health check: https://taskflow-backend-dar5.onrender.com/actuator/health
+- Live app: https://taskfloooow.netlify.app
+
+## How I deployed it
+
+### 1. Database on Neon
+1. Created a Neon project in **AWS Asia Pacific 1 (Singapore)**.
+2. Copied the connection string and split it into three values for Spring Boot:
+   - `DATABASE_URL`: `jdbc:postgresql://<host>/<database>?sslmode=require`
+   - `DATABASE_USERNAME`
+   - `DATABASE_PASSWORD`
+3. Left the database empty. Flyway creates the tables on the first start of the backend.
+
+### 2. Dockerfile
+Added a multi-stage `Dockerfile` in the project root. The first stage builds the jar with Maven and the second stage runs it on a slim Java 21 image.
+
+### 3. Push to GitHub
+Committed the code and the `Dockerfile`. No secrets are in the repo: the properties file contains only placeholders, and local values live in a git-ignored `application-local.properties`.
+
+### 4. Create the web service on Render
+1. Render, **New**, **Web Service**, and selected this repository.
+2. Runtime: **Docker**
+3. Region: **Singapore**
+4. Instance type: **Free**
+5. Health check path: `/actuator/health`
+
+### 5. Environment variables on Render
+
+| Key | Value |
+|---|---|
+| `DATABASE_URL` | JDBC URL from Neon |
+| `DATABASE_USERNAME` | Neon user |
+| `DATABASE_PASSWORD` | Neon password |
+| `JWT_SECRET` | New random secret generated for production |
+| `SPRING_PROFILES_ACTIVE` | `prod` |
+| `CORS_ALLOWED_ORIGINS` | Netlify frontend URL |
+
+### 6. Deploy and verify
+Render builds the image and starts the service. Opening `/actuator/health` returns `{"status":"UP"}`, and the logs show Flyway creating the schema.
+
+### 7. Connect the frontend
+After the frontend was live on Netlify, I set `CORS_ALLOWED_ORIGINS` to its URL. The CORS configuration reads this variable, so changing it and redeploying is all that is needed.
+
+> The free Render instance sleeps when idle, so the first request after a break can take 30 to 60 seconds.
